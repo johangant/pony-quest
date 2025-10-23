@@ -1,0 +1,566 @@
+<!doctype html>
+<!--
+  Pony Quest — Teaching Edition (verbose)
+  --------------------------------------
+  This is the same mini-game, rewritten to be easier to read and learn from.
+  Goals of this version:
+    • Lots of friendly comments explaining the *why* behind each step
+    • Clearer names (favor readability over brevity)
+    • Small, single-purpose functions instead of big anonymous blocks
+    • Gentle patterns that are common in beginner game projects
+
+  What you can look for with your kid:
+    - DATA: characters, horses, cosmetics
+    - INPUT: how we turn keys into a movement direction
+    - WORLD: little tile map creation
+    - MOVEMENT: normalize → scale by speed → collide
+    - INTERACTIONS: talk to villager, cross river, find satchel
+    - RENDER: draw world and a simple rider+horse icon
+    - LOOP: requestAnimationFrame drives update() and draw()
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pony Quest — Teaching Edition</title>
+  <style>
+    :root { --bg:#0b1021; --card:#141a33; --ink:#e7ecff; --muted:#a9b2d9; --accent:#72f0a6; }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1200px 800px at 70% -10%,#1a2150 0%,#0b1021 60%);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;}
+    header{display:flex;align-items:center;gap:12px;padding:18px 20px}
+    h1{font-size:20px;margin:0;letter-spacing:.5px}
+    #frame{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px}
+    #wrap{background:linear-gradient(180deg,#0e1531,#0b1021);border:1px solid #202855;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:16px;display:grid;grid-template-columns:1fr 320px;gap:16px}
+    canvas{width:100%;height:600px;border-radius:16px;display:block;background:#6bb16b}
+    #side{display:grid;gap:12px}
+    .card{background:var(--card);border:1px solid #222a55;border-radius:16px;padding:14px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    label{font-size:12px;color:var(--muted)}
+    select,button{width:100%;background:#0e1430;color:var(--ink);border:1px solid #27306a;border-radius:12px;padding:10px 12px;font-size:14px}
+    button{cursor:pointer}
+    button.primary{background:linear-gradient(180deg,#1d2a70,#121a4b);border-color:#3c4bb6}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .caption{font-size:12px;color:var(--muted)}
+    #log{height:180px;overflow:auto;font-size:13px;line-height:1.3;background:#0e1430;border:1px dashed #2b356d;border-radius:12px;padding:10px}
+    #dialog{position:absolute;left:24px;right:24px;bottom:24px;background:rgba(14,20,48,.9);border:1px solid #3140a4;border-radius:16px;padding:12px 14px;display:none}
+    #dialog p{margin:.4em 0}
+    #dialog .choices{display:flex;gap:8px;margin-top:8px}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid #3a46a8;background:#0f173e;color:var(--ink);font-size:12px}
+    #footer{opacity:.8;text-align:center;font-size:12px;margin-top:-6px}
+    a{color:var(--accent)}
+  </style>
+</head>
+<body>
+  <header>
+    <!-- Just a tiny logo icon for fun -->
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 20c0-2.21 2.686-4 6-4s6 1.79 6 4" stroke="#72f0a6" stroke-width="1.5" stroke-linecap="round"/><path d="M8 9c0-1.657 1.79-3 4-3s4 1.343 4 3-1 3-4 3-4 1.343-4 3" stroke="#72f0a6" stroke-width="1.5" stroke-linecap="round"/></svg>
+    <h1>Pony Quest — Teaching Edition</h1>
+  </header>
+
+  <div id="frame">
+    <div id="wrap">
+      <div style="position:relative">
+        <!-- The game lives inside this canvas. We draw everything with 2D Canvas API. -->
+        <canvas id="game" width="896" height="600"></canvas>
+        <!-- Lightweight dialog overlay for choices and messages. -->
+        <div id="dialog" role="dialog" aria-live="polite"></div>
+      </div>
+
+      <!-- Right sidebar: all UI controls and logs -->
+      <aside id="side">
+        <div class="card">
+          <div class="row">
+            <div style="flex:1">
+              <label for="charSel">Character</label>
+              <select id="charSel" aria-label="Choose character"></select>
+            </div>
+            <div style="flex:1">
+              <label for="horseSel">Horse</label>
+              <select id="horseSel" aria-label="Choose horse"></select>
+            </div>
+          </div>
+          <div class="row">
+            <div style="flex:1">
+              <label for="colorSel">Horse Colour</label>
+              <select id="colorSel" aria-label="Choose horse colour"></select>
+            </div>
+            <div style="flex:1">
+              <label for="tackSel">Tack</label>
+              <select id="tackSel" aria-label="Choose tack"></select>
+            </div>
+          </div>
+          <div class="row">
+            <button id="startBtn" class="primary">Start Adventure</button>
+          </div>
+          <p class="caption">Controls: <span class="pill">WASD</span>/<span class="pill">Arrows</span> to move, <span class="pill">E</span> to interact, <span class="pill">M</span> to mute.</p>
+        </div>
+
+        <div class="card">
+          <strong>Quest</strong>
+          <p id="questText" class="caption">Explore Whisperwood Valley and help the villagers with a small problem.</p>
+        </div>
+
+        <div class="card">
+          <strong>Event Log</strong>
+          <div id="log" aria-live="polite"></div>
+        </div>
+
+        <div class="card">
+          <button id="resetBtn">Reset</button>
+        </div>
+      </aside>
+    </div>
+    <div id="footer">Built as a single-file demo. Extend freely ✨</div>
+  </div>
+
+<script>
+/*************************************************
+ * SECTION 1 — Simple game data (characters/horses)
+ *************************************************/
+const CHARACTERS = [
+  { id:'ranger', name:'Rowan the Ranger', perk:'Sees hidden paths', color:'#7ec8e3' },
+  { id:'tinker', name:'Pip the Tinkerer', perk:'Builds bridges faster', color:'#f1b57a' },
+  { id:'bard',   name:'Lyra the Bard',    perk:'Charms animals',     color:'#cbb1ff' },
+];
+
+const HORSES = [
+  { id:'pony',  name:'Highland Pony', speed:1.9, stamina:3, perk:'Sure‑footed' },
+  { id:'arab',  name:'Arabian',       speed:2.2, stamina:2, perk:'Desert dash' },
+  { id:'shire', name:'Shire',         speed:1.7, stamina:4, perk:'Steady as oak' },
+];
+
+const HORSE_COLORS = ['Chestnut','Dapple Grey','Black','Palomino'];
+const TACK         = ['Plain leather','Blue blanket','Forest green','Royal purple'];
+
+
+/****************************************
+ * SECTION 2 — DOM helpers & UI utilities
+ ****************************************/
+const $  = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+/** Append a message to the log panel (newest on top). */
+function logMessage(text){
+  const line = document.createElement('div');
+  line.textContent = text;
+  $('#log').prepend(line);
+}
+
+/** Create and append <option> elements to a select. */
+function fillSelect(select, values, getText = (v)=>String(v), getValue = (v)=>v){
+  for(const [i, val] of values.entries()){
+    const opt = document.createElement('option');
+    opt.value = getValue(val);
+    opt.textContent = getText(val);
+    if(i===0) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+
+/*********************************
+ * SECTION 3 — Tiny audio feedback
+ *********************************/
+let audioCtx = null;  // lazily created
+let audioMuted = false;
+
+function playBeep(){
+  if(audioMuted) return;                // respect the mute toggle
+  if(!audioCtx){                        // lazy-init the Web Audio graph
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  }
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5-ish
+  gain.gain.value = 0.02;               // very quiet
+  osc.start();
+  setTimeout(()=>osc.stop(), 100);      // short blip
+}
+
+
+/********************************************
+ * SECTION 4 — Canvas, world, and game state
+ ********************************************/
+const canvas = $('#game');
+const ctx    = canvas.getContext('2d');
+const WIDTH  = canvas.width;
+const HEIGHT = canvas.height;
+
+// Tile constants — internal IDs used by the map grid
+const TILES = Object.freeze({ GRASS:0, TREE:1, WATER:2, FORD:3, VILLAGE:4, RELIC:5 });
+const TILE_SIZE = 32; // pixels per tile
+
+// Global-ish input state; keys["a"] === true when "a" is currently pressed
+const keys = Object.create(null);
+
+// High-level game state machine: 'menu' vs 'game'
+let gamePhase = 'menu';
+
+// These references get populated when a game starts
+let world = null;     // { map:number[][], cols:number, rows:number }
+let rider = null;     // player object with position/velocity/etc.
+let questProgress = 0; // 0: not accepted → 3: finished
+
+
+/****************************************
+ * SECTION 5 — World generation (tiny map)
+ ****************************************/
+function makeWorld(){
+  // Compute how many tiles fit across the canvas
+  const cols = Math.floor(WIDTH / TILE_SIZE);
+  const rows = Math.floor(HEIGHT / TILE_SIZE);
+
+  // Start with all grass
+  const map = Array.from({length:rows}, ()=>Array(cols).fill(TILES.GRASS));
+
+  // Sprinkle trees randomly for a bit of texture
+  for(let i=0;i<400;i++){
+    const x = (Math.random()*cols)|0;
+    const y = (Math.random()*rows)|0;
+    map[y][x] = TILES.TREE;
+  }
+
+  // Carve a vertical-ish clear path near the left
+  for(let y=5;y<rows-5;y++){
+    map[y][8] = TILES.GRASS; map[y][9] = TILES.GRASS;
+  }
+
+  // A river across the map
+  const riverY = 9;
+  for(let x=0; x<cols; x++) map[riverY][x] = TILES.WATER;
+
+  // A shallow ford where horses can cross
+  for(let x=20; x<23; x++) map[riverY][x] = TILES.FORD;
+
+  // A tiny village area (a 4x3 patch) near the top-left
+  for(let y=2; y<5; y++){
+    for(let x=2; x<6; x++) map[y][x] = TILES.VILLAGE;
+  }
+
+  // Clear some trees near the village and the relic so it feels intentional
+  for(let y=0; y<7; y++){
+    for(let x=0; x<8; x++) if(map[y][x]===TILES.TREE) map[y][x] = TILES.GRASS;
+  }
+
+  // Relic site (three tiles) in the south-east
+  map[rows-5][cols-6] = TILES.RELIC;
+  map[rows-5][cols-5] = TILES.RELIC;
+  map[rows-6][cols-6] = TILES.RELIC;
+
+  return { map, cols, rows };
+}
+
+
+/********************************
+ * SECTION 6 — Input (keyboard)
+ ********************************/
+// Update the keys map on keydown/keyup
+window.addEventListener('keydown', (e)=>{
+  keys[e.key] = true;
+  // Quick mute toggle for the beep
+  if(e.key==='m' || e.key==='M'){
+    audioMuted = !audioMuted; logMessage(audioMuted? 'Muted.' : 'Unmuted.');
+  }
+});
+
+window.addEventListener('keyup', (e)=>{
+  keys[e.key] = false;
+});
+
+/** Convert current key presses into a direction vector (ax, ay) in [-1..1]. */
+function getInputDirection(){
+  const left  = !!(keys['ArrowLeft']  || keys['a']);
+  const right = !!(keys['ArrowRight'] || keys['d']);
+  const up    = !!(keys['ArrowUp']    || keys['w']);
+  const down  = !!(keys['ArrowDown']  || keys['s']);
+
+  // Horizontal: +1 means move right, -1 means move left
+  const ax = (right ? 1 : 0) - (left ? 1 : 0);
+  // Vertical:   +1 means move down,  -1 means move up
+  const ay = (down  ? 1 : 0) - (up   ? 1 : 0);
+  return { ax, ay };
+}
+
+/** Normalize a vector. If zero-length, return {0,0} to avoid NaNs. */
+function normalizeVector(x, y){
+  const len = Math.hypot(x, y);
+  if(len === 0) return { x:0, y:0 };
+  return { x: x/len, y: y/len };
+}
+
+
+/*******************************************
+ * SECTION 7 — Collision helpers (tile grid)
+ *******************************************/
+/** Safely get the tile ID at a pixel coordinate, clamping to trees outside the map. */
+function tileAtPixel(px, py){
+  const tx = Math.floor(px / TILE_SIZE);
+  const ty = Math.floor(py / TILE_SIZE);
+  if(ty < 0 || ty >= world.rows || tx < 0 || tx >= world.cols) return TILES.TREE; // treat outside as solid
+  return world.map[ty][tx];
+}
+
+/** Can we stand on the given pixel coordinate? */
+function canStandAt(px, py){
+  const t = tileAtPixel(px, py);
+  return (t===TILES.GRASS || t===TILES.FORD || t===TILES.VILLAGE || t===TILES.RELIC);
+}
+
+
+/*************************************
+ * SECTION 8 — Starting and resetting
+ *************************************/
+function startGame(){
+  // Read current UI selections
+  const chosenChar  = CHARACTERS.find(c=>c.id === $('#charSel').value);
+  const chosenHorse = HORSES.find(h=>h.id === $('#horseSel').value);
+  const coatColor   = $('#colorSel').value;
+  const tackStyle   = $('#tackSel').value;
+
+  // Build the world and place the rider near the village
+  world = makeWorld();
+
+  // Player (rider) state. Positions are in pixels (not tiles).
+  rider = {
+    x: 5*TILE_SIZE,  // start near the village
+    y: 4*TILE_SIZE,
+    vx: 0,           // current velocity X (pixels/sec)
+    vy: 0,           // current velocity Y (pixels/sec)
+    maxSpeed: 90 * chosenHorse.speed, // top speed in pixels/sec
+    facing: 0,       // not used for drawing yet but handy for sprites later
+
+    // cosmetic + choice data
+    character: chosenChar,
+    horse: chosenHorse,
+    coatColor,
+    tackStyle,
+  };
+
+  questProgress = 0; // reset quest
+
+  // Update sidebar quest text and log a couple lines
+  $('#questText').textContent = 'Speak to the villager, cross the river at the ford, and find the glowing satchel near the ruins.';
+  logMessage(`You are ${chosenChar.name} riding a ${chosenHorse.name} (${coatColor}).`);
+  logMessage('A villager needs help retrieving a glowing satchel lost across the river…');
+
+  gamePhase = 'game';
+}
+
+// Wire up UI buttons
+$('#startBtn').addEventListener('click', startGame);
+$('#resetBtn').addEventListener('click', ()=>{ gamePhase='menu'; world=null; });
+
+
+/********************************************
+ * SECTION 9 — Interactions (press E to act)
+ ********************************************/
+// Simple proximity checks for the main points of interest
+function isNearVillage(){
+  return Math.hypot(rider.x - 4*TILE_SIZE, rider.y - 4*TILE_SIZE) < 80;
+}
+function isNearRelic(){
+  return Math.hypot(rider.x - (world.cols-6.5)*TILE_SIZE, rider.y - (world.rows-5.5)*TILE_SIZE) < 80;
+}
+function isAtFord(){
+  const nearRiverRow = Math.abs(rider.y/TILE_SIZE - 9) < 0.5;      // near the river row
+  const nearFordCols = Math.abs(rider.x/TILE_SIZE - 21.5) < 2.5;   // within the shallow patch
+  return nearRiverRow && nearFordCols;
+}
+
+// Show a modal-like dialog with buttons, then call onChoose with the value
+function showDialog(title, body, choices, onChoose){
+  const d = $('#dialog');
+  d.innerHTML = `<p><strong>${title}</strong></p><p>${body}</p>`;
+  const row = document.createElement('div'); row.className='choices';
+  for(const c of choices){
+    const b = document.createElement('button');
+    b.textContent = c.label;
+    b.addEventListener('click', ()=>{ d.style.display='none'; onChoose && onChoose(c.val); });
+    row.appendChild(b);
+  }
+  d.appendChild(row);
+  d.style.display='block';
+}
+
+// When the player presses E, try context-sensitive interactions
+window.addEventListener('keydown', (e)=>{
+  if(gamePhase !== 'game') return;
+  if(e.key !== 'e' && e.key !== 'E') return;
+
+  // 1) Talk to the villager to accept the quest
+  if(isNearVillage() && questProgress===0){
+    showDialog('Villager', 'Please, rider! My glowing satchel was swept across the river. Can you bring it back?', [
+      {label:'We will help!', val:'accept'}, {label:'Not now', val:'decline'}
+    ], (val)=>{
+      if(val==='accept'){ logMessage('You accepted the quest.'); questProgress=1; }
+      else { logMessage('Maybe later…'); }
+    });
+    return;
+  }
+
+  // 2) Pick up the satchel at the ruins once you made it across
+  if(isNearRelic() && questProgress>=1){
+    showDialog('Ruins', 'You find the satchel nestled by ancient stones. It hums softly.', [
+      {label:'Take satchel', val:'take'}
+    ], (val)=>{ if(val==='take'){ logMessage('You picked up the satchel!'); questProgress=2; playBeep(); } });
+    return;
+  }
+
+  // 3) Crossing logic at the ford (horse-specific flavor)
+  if(isAtFord() && questProgress>=1 && rider.horse.id==='shire'){
+    showDialog('Ford', 'The current is strong, but your Shire is steady as oak. Cross safely?', [
+      {label:'Cross now', val:'cross'}, {label:'Wait', val:'wait'}
+    ], (v)=>{ if(v==='cross'){ logMessage('You ford the river confidently.'); questProgress=Math.max(questProgress,1.5);} });
+    return;
+  }
+
+  if(isAtFord() && questProgress>=1){
+    showDialog('Ford', 'The river tugs at the legs. Time your crossing.', [
+      {label:'Cross at low ebb', val:'safe'}, {label:'Charge through!', val:'risky'}
+    ], (v)=>{ if(v==='safe'){ logMessage('You watch, then cross during a lull.'); questProgress=Math.max(questProgress,1.4);} else { logMessage('A wobble! But you make it.'); questProgress=Math.max(questProgress,1.3);} });
+    return;
+  }
+
+  // 4) Return the satchel to the villager and finish
+  if(isNearVillage() && questProgress>=2){
+    showDialog('Villager', 'You returned the satchel! Thank you. Please, take this lucky charm.', [
+      {label:'Finish', val:'end'}
+    ], (v)=>{ if(v==='end'){ logMessage('Quest complete!'); questProgress=3; } });
+  }
+});
+
+
+/*************************************************
+ * SECTION 10 — Movement and physics-like behavior
+ *************************************************/
+/** Attempt to move along X and Y separately so we can slide along obstacles. */
+function moveRider(deltaSeconds){
+  // 1) Read input (WASD/Arrows) as a unit-length direction vector
+  const { ax, ay } = getInputDirection();
+  const dir = normalizeVector(ax, ay); // (0,0) if idle
+
+  // Early-exit if no input; saves work and avoids unnecessary collision checks
+  if(dir.x === 0 && dir.y === 0) return;
+
+  // 2) Convert direction into velocity (pixels/sec)
+  const speed = rider.maxSpeed;
+  const vx = dir.x * speed;
+  const vy = dir.y * speed;
+
+  // 3) Predict where we would be this frame
+  const nextX = rider.x + vx * deltaSeconds;
+  const nextY = rider.y + vy * deltaSeconds;
+
+  // 4) Axis-separated collision checks so we can slide along trees/walls
+  if(canStandAt(nextX, rider.y)) rider.x = nextX; // try X first
+  if(canStandAt(rider.x, nextY)) rider.y = nextY; // then Y
+}
+
+
+/***************************
+ * SECTION 11 — Rendering
+ ***************************/
+function drawWorld(){
+  const m = world.map; const rows = world.rows; const cols = world.cols;
+  for(let y=0; y<rows; y++){
+    for(let x=0; x<cols; x++){
+      const t = m[y][x];
+      const px = x*TILE_SIZE, py = y*TILE_SIZE;
+      if(t===TILES.GRASS){ ctx.fillStyle = (x+y)%2? '#6eb86e':'#69b069'; ctx.fillRect(px,py,TILE_SIZE,TILE_SIZE); }
+      if(t===TILES.TREE){  ctx.fillStyle = '#5aa25a'; ctx.fillRect(px,py,TILE_SIZE,TILE_SIZE); ctx.fillStyle='#2d6b2d'; ctx.beginPath(); ctx.arc(px+16,py+16,10,0,Math.PI*2); ctx.fill(); }
+      if(t===TILES.WATER){ ctx.fillStyle = '#4a7bd0'; ctx.fillRect(px,py,TILE_SIZE,TILE_SIZE); }
+      if(t===TILES.FORD){  ctx.fillStyle = '#6da4e6'; ctx.fillRect(px,py,TILE_SIZE,TILE_SIZE); }
+      if(t===TILES.VILLAGE){ ctx.fillStyle = '#d9b36b'; ctx.fillRect(px,py,TILE_SIZE,TILE_SIZE); ctx.fillStyle='#8a5a2b'; ctx.fillRect(px+8,py+8,16,12); }
+      if(t===TILES.RELIC){ ctx.fillStyle = '#9cc59c'; ctx.fillRect(px,py,TILE_SIZE,TILE_SIZE); ctx.fillStyle='#e7ecff'; ctx.fillRect(px+10,py+10,12,8); }
+    }
+  }
+}
+
+function drawRider(){
+  const r = rider; const px = r.x, py = r.y;
+  ctx.save(); ctx.translate(px, py);
+
+  // Horse body (simple rectangles)
+  const coat = ({'Chestnut':'#8b4a2a','Dapple Grey':'#9aa0a8','Black':'#222','Palomino':'#d9b36b'})[r.coatColor] || '#444';
+  ctx.fillStyle = coat; ctx.fillRect(-14,-8,28,16); // body
+  ctx.fillRect(-18,-4,6,8);                          // head block
+  ctx.fillRect(12,-4,6,8);                           // tail block
+
+  // Tack highlight stripe on the horse
+  const tackClr = ({'Plain leather':'#6b4e2e','Blue blanket':'#6187ff','Forest green':'#59a05f','Royal purple':'#7a59a0'})[r.tackStyle] || '#6b4e2e';
+  ctx.fillStyle = tackClr; ctx.fillRect(-8,-12,16,4);
+
+  // Rider (simple shapes)
+  ctx.fillStyle = r.character.color; ctx.fillRect(-6,-18,12,6); // torso
+  ctx.fillStyle = '#fff';                ctx.fillRect(-4,-22,8,4);  // head
+  ctx.restore();
+}
+
+function drawHUD(){
+  // Semi-transparent panel in the corner
+  ctx.fillStyle='rgba(10,15,35,.65)'; ctx.fillRect(10,10,320,64);
+  ctx.fillStyle='#e7ecff'; ctx.font='14px system-ui, sans-serif';
+  ctx.fillText(`Rider: ${rider.character.name}`, 20, 30);
+  ctx.fillText(`Horse: ${rider.horse.name} • ${rider.coatColor} • ${rider.tackStyle}`, 20, 48);
+
+  // A simple end card when done
+  if(questProgress>=3){
+    ctx.fillStyle='rgba(10,15,35,.8)'; ctx.fillRect(WIDTH/2-160, HEIGHT/2-40, 320, 80);
+    ctx.fillStyle='#e7ecff'; ctx.textAlign='center'; ctx.fillText('Quest Complete! 🎉', WIDTH/2, HEIGHT/2);
+    ctx.textAlign='start';
+  }
+}
+
+function drawTitleScreen(){
+  ctx.fillStyle = '#0b1021'; ctx.fillRect(0,0,WIDTH,HEIGHT);
+  ctx.fillStyle = '#e7ecff'; ctx.font='28px system-ui, sans-serif';
+  ctx.fillText('Whisperwood Valley', 36, 80);
+  ctx.font='16px system-ui, sans-serif';
+  ctx.fillText('Pick a character and horse on the right, then press Start Adventure.', 36, 108);
+}
+
+
+/******************************
+ * SECTION 12 — Game loop
+ ******************************/
+let previousTimestamp = 0; // used to compute delta time between frames
+
+function update(deltaSeconds){
+  if(gamePhase !== 'game') return; // nothing to update while on the title screen
+  moveRider(deltaSeconds);
+}
+
+function draw(){
+  ctx.clearRect(0,0,WIDTH,HEIGHT);
+  if(gamePhase !== 'game'){ drawTitleScreen(); return; }
+  drawWorld();
+  drawRider();
+  drawHUD();
+}
+
+function frame(timestamp){
+  const deltaSeconds = (timestamp - previousTimestamp) / 1000;
+  previousTimestamp = timestamp;
+  update(deltaSeconds);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+
+/******************************************
+ * SECTION 13 — Bootstrapping the UI & run
+ ******************************************/
+function populateSelectors(){
+  fillSelect($('#charSel'), CHARACTERS, (c)=>c.name, (c)=>c.id);
+  fillSelect($('#horseSel'), HORSES,     (h)=>h.name, (h)=>h.id);
+  fillSelect($('#colorSel'), HORSE_COLORS);
+  fillSelect($('#tackSel'),  TACK);
+}
+
+populateSelectors();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
